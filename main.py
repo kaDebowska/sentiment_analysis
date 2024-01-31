@@ -1,6 +1,7 @@
 import re
-from collections import defaultdict
 import math
+from collections import defaultdict
+from collections import Counter
 
 
 def tokenize(text):
@@ -15,9 +16,8 @@ def stop_words(filename):
     return stopwords
 
 
-def remove_stop_words(tokens):
-    stopwords = stop_words('stopwords.txt')
-    return [token for token in tokens if token not in stopwords]
+def remove_stop_words(tokens, stopword_set):
+    return [token for token in tokens if token not in stopword_set]
 
 
 def generate_text_and_labels(filename):
@@ -29,44 +29,33 @@ def generate_text_and_labels(filename):
             yield text, label
 
 
-def create_feature_dictionary(generator):
-    feature_dict = {}
+def create_feature_dictionary(generator, stopwords_set):
+    feature_dict = defaultdict(Counter)
+
     for text, label in generator:
-        tokens = remove_stop_words(tokenize(text))
+        tokens = remove_stop_words(tokenize(text), stopwords_set)
+        feature_dict[label] += Counter(tokens)
 
-        if label not in feature_dict:
-            feature_dict[label] = {}
-
-        for token in tokens:
-            if token not in feature_dict[label]:
-                feature_dict[label][token] = 1
-            else:
-                feature_dict[label][token] += 1
-
-    return feature_dict
-
-
-def sort_dictionary(feature_dict):
-    for label, token_freq in feature_dict.items():
-        feature_dict[label] = dict(sorted(token_freq.items(), key=lambda item: item[1], reverse=True))
     return feature_dict
 
 
 def train_naive_bayes(feature_dict, labels):
     model = {}
+
     total_docs = sum(len(feature_dict[label]) for label in labels)
 
     for label in labels:
         model[label] = {'prior': len(feature_dict[label]) / total_docs, 'tokens': defaultdict(int)}
+        total_occurrences = sum(feature_dict[label].values())
 
-        for token, occurrence in feature_dict[label].items():
-            model[label]['tokens'][token] = occurrence / sum(feature_dict[label].values())
+        for token in feature_dict[label]:
+            model[label]['tokens'][token] = feature_dict[label][token] / total_occurrences
 
     return model
 
 
-def classify_text(model, text, labels):
-    tokens = remove_stop_words(tokenize(text))
+def classify_text(model, text, labels, stopwords_set):
+    tokens = remove_stop_words(tokenize(text), stopwords_set)
     scores = {}
 
     for label in labels:
@@ -78,12 +67,12 @@ def classify_text(model, text, labels):
     return max(scores, key=scores.get)
 
 
-def evaluate_model(model, generator, labels):
+def evaluate_model(model, generator, labels, stopwords_set):
     correct_predictions = 0
     total_samples = 0
 
     for text, true_label in generator:
-        predicted_label = classify_text(model, text, labels)
+        predicted_label = classify_text(model, text, labels, stopwords_set)
         total_samples += 1
 
         if predicted_label == true_label:
@@ -94,10 +83,9 @@ def evaluate_model(model, generator, labels):
 
 
 def main():
-    feature_dictionary = create_feature_dictionary(generate_text_and_labels('all.text.train.txt'))
-    print("feature_dictionary")
+    stopwords_set = set(stop_words('stopwords.txt'))
+    feature_dictionary = create_feature_dictionary(generate_text_and_labels('all.text.train.txt'), stopwords_set)
     labels = feature_dictionary.keys()
-    print("labels")
 
     labels_description = {
         '__label__meta_minus_m': 'Wypowiedź negatywna',
@@ -107,7 +95,6 @@ def main():
     }
 
     naive_bayes_model = train_naive_bayes(feature_dictionary, labels)
-    print("naive_bayes_model")
     sample_texts = [
         "Obsługa była miła i profesjonalna",
         "Hotel był wygodny, choć mały",
@@ -125,17 +112,16 @@ def main():
     ]
 
     test_data_generator = generate_text_and_labels('all.text.test.txt')
-    print("test_data_generator")
 
-    accuracy = evaluate_model(naive_bayes_model, test_data_generator, labels)
-    print("accuracy")
+    accuracy = evaluate_model(naive_bayes_model, test_data_generator, labels, stopwords_set)
 
     print(f"Dokładność modelu na zbiorze testowym: {accuracy * 100:.2f}%")
 
     for sample_text in sample_texts:
-        classified_label = classify_text(naive_bayes_model, sample_text, labels)
-        print(f"\nKlasyfikacja dla tekstu: {sample_text}\nPrzewidziana etykieta: {labels_description[classified_label]}")
-    print("classified_label")
+        classified_label = classify_text(naive_bayes_model, sample_text, labels, stopwords_set)
+        print(
+            f"\nKlasyfikacja dla tekstu: {sample_text}\nPrzewidziana etykieta: {labels_description[classified_label]}")
+
 
 if __name__ == "__main__":
     main()
